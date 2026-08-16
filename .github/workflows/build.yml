@@ -1,0 +1,96 @@
+name: Gerar versão sem login
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: ${{ !contains(github.event.head_commit.message, '[sem-login-ok]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Gerar apresentação
+        shell: python {0}
+        run: |
+          from pathlib import Path
+          from urllib.request import urlopen, Request
+          import re
+
+          url='https://raw.githubusercontent.com/Indominho/Setor-Madeiras/main/index.html'
+          req=Request(url,headers={'User-Agent':'Mozilla/5.0'})
+          s=urlopen(req,timeout=60).read().decode('utf-8')
+
+          # Remove o reparo anterior, que continha o login.
+          s=re.sub(r'\s*<!-- reparo-final-inicio -->.*?<!-- reparo-final-fim -->\s*','\n',s,flags=re.S)
+
+          block=r'''
+          <!-- versao-sem-login-inicio -->
+          <style id="directDeckStyles">
+          html,body{margin:0!important;width:100%!important;height:100%!important;overflow:hidden!important;background:#153b30!important;overscroll-behavior:none!important}
+          .chassis-cursor,.nav-dots,.keyboard-hint,.chassis-credit,.design-ui-credit,.css-arrow,.css-count,.deck-arrow,.deck-hint,.deck-count,.keyboard-ready{display:none!important}
+          .slide-viewport,.slide-viewport:first-of-type,.slide-viewport:target{position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;height:100dvh!important;display:none!important;overflow:hidden!important;scroll-snap-align:none!important;z-index:1!important;background:#153b30!important}
+          .slide-viewport.direct-active{display:block!important}
+          .slide-scale{position:absolute!important;left:50%!important;top:50%!important;width:1920px!important;height:1080px!important;transform:translate(-50%,-50%) scale(var(--direct-scale,1))!important;transform-origin:center center!important}
+          .slide{width:1920px!important;height:1080px!important}
+          #directNav{position:fixed;inset:0;z-index:2147483000;pointer-events:none}
+          .direct-arrow{position:absolute;top:50%;transform:translateY(-50%);width:52px;height:52px;border:1px solid rgba(255,255,255,.38);border-radius:50%;background:#153b30;color:#f8fbf7;font:800 26px/1 system-ui;pointer-events:auto;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.18)}
+          #directPrev{left:max(8px,env(safe-area-inset-left))}#directNext{right:max(8px,env(safe-area-inset-right))}.direct-arrow:disabled{opacity:.25}
+          #directCount{position:absolute;right:max(10px,env(safe-area-inset-right));bottom:max(10px,env(safe-area-inset-bottom));padding:7px 10px;border-radius:999px;background:#153b30;color:#f8fbf7;font:750 12px/1 system-ui}
+          @media(max-width:760px){.direct-arrow{width:44px;height:44px;font-size:22px}#directCount{font-size:11px}}
+          @media(min-width:1800px){.direct-arrow{width:64px;height:64px;font-size:32px}}
+          @media print{#directNav{display:none!important}.slide-viewport,.slide-viewport.direct-active{position:relative!important;display:block!important;width:1920px!important;height:1080px!important;break-after:page}.slide-scale{position:static!important;transform:none!important}}
+          </style>
+          <div id="directNav" aria-label="Navegação dos slides"><button id="directPrev" class="direct-arrow" type="button" aria-label="Slide anterior">‹</button><button id="directNext" class="direct-arrow" type="button" aria-label="Próximo slide">›</button><span id="directCount"></span></div>
+          <script id="directDeckScript">
+          (()=>{
+            'use strict';
+            let index=0,startX=0,startY=0;
+            const slides=()=>Array.from(document.querySelectorAll('.slide-viewport'));
+            function scale(){const vv=window.visualViewport,w=vv?vv.width:innerWidth,h=vv?vv.height:innerHeight;document.documentElement.style.setProperty('--direct-scale',String(Math.min(w/1920,h/1080)))}
+            function show(n){const all=slides();if(!all.length)return;index=Math.max(0,Math.min(n,all.length-1));all.forEach((el,i)=>{el.classList.toggle('direct-active',i===index);el.setAttribute('aria-hidden',i===index?'false':'true')});directCount.textContent=`${index+1} / ${all.length}`;directPrev.disabled=index===0;directNext.disabled=index===all.length-1;history.replaceState(null,'',`#slide-${index+1}`);scale()}
+            function move(d){show(index+d)}
+            window.addEventListener('keydown',e=>{if(['ArrowRight','ArrowDown','PageDown',' ','Enter'].includes(e.key)){e.preventDefault();e.stopImmediatePropagation();move(1)}else if(['ArrowLeft','ArrowUp','PageUp'].includes(e.key)){e.preventDefault();e.stopImmediatePropagation();move(-1)}else if(e.key==='Home'){e.preventDefault();e.stopImmediatePropagation();show(0)}else if(e.key==='End'){e.preventDefault();e.stopImmediatePropagation();show(slides().length-1)}},true);
+            directPrev.addEventListener('click',()=>move(-1));directNext.addEventListener('click',()=>move(1));
+            document.addEventListener('touchstart',e=>{if(e.touches.length!==1)return;startX=e.touches[0].clientX;startY=e.touches[0].clientY},{passive:true});
+            document.addEventListener('touchend',e=>{if(!e.changedTouches.length)return;const dx=e.changedTouches[0].clientX-startX,dy=e.changedTouches[0].clientY-startY;if(Math.abs(dx)>55&&Math.abs(dx)>Math.abs(dy)*1.25)move(dx<0?1:-1)},{passive:true});
+            addEventListener('resize',scale,{passive:true});addEventListener('orientationchange',()=>setTimeout(scale,120),{passive:true});if(window.visualViewport)visualViewport.addEventListener('resize',scale,{passive:true});
+            document.documentElement.classList.add('reveals-ready');scale();show(0);document.body.focus({preventScroll:true});
+          })();
+          </script>
+          <!-- versao-sem-login-fim -->
+          '''
+
+          # Insere depois do body real, localizado somente após o fechamento do head.
+          s,n=re.subn(r'(</head>\s*<body\b[^>]*>)',lambda m:m.group(1)+'\n'+block,s,count=1,flags=re.I)
+          assert n==1
+          Path('index.html').write_text(s,encoding='utf-8')
+
+      - name: Validar
+        shell: python {0}
+        run: |
+          from pathlib import Path
+          import re
+          s=Path('index.html').read_text(encoding='utf-8')
+          m=re.search(r'</head>\s*<body\b[^>]*>',s,re.I)
+          direct=s.find('<!-- versao-sem-login-inicio -->')
+          first=s.find('class="slide-viewport"',m.end())
+          assert m and m.end()<direct<first
+          assert s.count('id="directDeckScript"')==1
+          assert s.count('class="slide-viewport"')==15
+          assert 'id="finalGate"' not in s
+          assert 'Math.min(w/1920,h/1080)' in s
+          assert 'stopImmediatePropagation()' in s
+          assert 'touchstart' in s and 'orientationchange' in s
+
+      - name: Salvar versão
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git commit -m "Publica apresentação alternativa sem login [sem-login-ok]"
+          git push
