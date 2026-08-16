@@ -1,0 +1,85 @@
+name: Adicionar controles em todas as evidências
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  aplicar:
+    if: ${{ !contains(github.event.head_commit.message, '[fotos-evidencias-ok]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preservar original e adicionar controles
+        shell: python {0}
+        run: |
+          from pathlib import Path
+          import re
+          p=Path('index.html')
+          s=p.read_text(encoding='utf-8')
+          s=re.sub(r'\s*<!-- fotos-evidencias-inicio -->.*?<!-- fotos-evidencias-fim -->\s*','\n',s,flags=re.S)
+          block=r'''
+          <!-- fotos-evidencias-inicio -->
+          <style id="evidencePhotoStyles">
+          .evidence-photo-tools{position:absolute;left:12px;bottom:48px;z-index:20;display:flex;align-items:center;gap:6px;padding:6px;border-radius:12px;background:oklch(98% .008 145);box-shadow:0 5px 18px oklch(22% .035 164/.18);font-family:system-ui,sans-serif;line-height:1}
+          .evidence-photo-tools button{height:38px;min-width:44px;padding:0 11px;border:1px solid oklch(84% .02 155);border-radius:9px;background:oklch(94% .025 140);color:oklch(28% .055 164);font:800 12px/1 system-ui;cursor:pointer}
+          .evidence-photo-tools button[data-action="save"]{background:oklch(67% .145 127);border-color:oklch(67% .145 127);color:oklch(99% .004 145)}
+          .evidence-photo-tools button:focus-visible{outline:3px solid oklch(67% .145 127/.35);outline-offset:2px}
+          .evidence-photo-tools button:disabled{opacity:.45;cursor:not-allowed}
+          .evidence-photo-tools .evidence-state{min-width:52px;color:oklch(49% .025 160);font:750 11px/1.1 system-ui;text-align:center}
+          @media(max-width:760px){.evidence-photo-tools{left:7px;bottom:38px;gap:4px;padding:4px}.evidence-photo-tools button{height:34px;padding:0 8px;font-size:10px}.evidence-photo-tools .evidence-state{display:none}}
+          </style>
+          <script id="evidencePhotoScript">
+          (()=>{
+            'use strict';
+            const DB='setor-madeiras-evidencias-v1',STORE='photos';
+            const openDB=()=>new Promise((resolve,reject)=>{const r=indexedDB.open(DB,1);r.onupgradeneeded=()=>{if(!r.result.objectStoreNames.contains(STORE))r.result.createObjectStore(STORE)};r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)});
+            const get=async key=>{const db=await openDB();return new Promise((resolve,reject)=>{const r=db.transaction(STORE).objectStore(STORE).get(key);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)})};
+            const put=async(key,value)=>{const db=await openDB();return new Promise((resolve,reject)=>{const r=db.transaction(STORE,'readwrite').objectStore(STORE).put(value,key);r.onsuccess=()=>resolve();r.onerror=()=>reject(r.error)})};
+            const del=async key=>{const db=await openDB();return new Promise((resolve,reject)=>{const r=db.transaction(STORE,'readwrite').objectStore(STORE).delete(key);r.onsuccess=()=>resolve();r.onerror=()=>reject(r.error)})};
+            const images=[...new Set(document.querySelectorAll('figure img.zoomable, figure img.evidence-image, .photo img'))];
+            images.forEach(async(img,i)=>{
+              const host=img.closest('figure,.photo');if(!host)return;
+              if(host.querySelector('.tools,.photo-action,.evidence-photo-tools'))return;
+              const original=img.getAttribute('src');
+              const slide=img.closest('.slide');
+              const key=`${location.pathname}|${slide?.id||'slide'}|${img.alt||i}`;
+              let pending=null,pendingOriginal=false,objectURL='';
+              const bar=document.createElement('div');bar.className='evidence-photo-tools';bar.innerHTML='<button type="button" data-action="pick">Trocar foto</button><button type="button" data-action="restore">Restaurar</button><button type="button" data-action="save" disabled>Salvar foto</button><span class="evidence-state">Original</span><input type="file" accept="image/*" hidden>';
+              host.appendChild(bar);
+              const pick=bar.querySelector('[data-action="pick"]'),restore=bar.querySelector('[data-action="restore"]'),save=bar.querySelector('[data-action="save"]'),state=bar.querySelector('.evidence-state'),input=bar.querySelector('input');
+              const showBlob=blob=>{if(objectURL)URL.revokeObjectURL(objectURL);objectURL=URL.createObjectURL(blob);img.src=objectURL};
+              try{const stored=await get(key);if(stored){showBlob(stored);state.textContent='Salva'}}catch(e){state.textContent='Original'}
+              pick.onclick=e=>{e.stopPropagation();input.click()};
+              input.onchange=()=>{const file=input.files&&input.files[0];if(!file)return;pending=file;pendingOriginal=false;showBlob(file);save.disabled=false;state.textContent='Pendente';input.value=''};
+              restore.onclick=e=>{e.stopPropagation();pending=null;pendingOriginal=true;if(objectURL){URL.revokeObjectURL(objectURL);objectURL=''}img.src=original;save.disabled=false;state.textContent='Pendente'};
+              save.onclick=async e=>{e.stopPropagation();save.disabled=true;state.textContent='Salvando';try{if(pendingOriginal)await del(key);else if(pending)await put(key,pending);pending=null;pendingOriginal=false;state.textContent='Salva'}catch(err){state.textContent='Erro';save.disabled=false}};
+            });
+          })();
+          </script>
+          <!-- fotos-evidencias-fim -->
+          '''
+          s=s.replace('</body>',block+'\n</body>',1)
+          p.write_text(s,encoding='utf-8')
+      - name: Validar
+        shell: python {0}
+        run: |
+          from pathlib import Path
+          s=Path('index.html').read_text(encoding='utf-8')
+          assert s.count('id="evidencePhotoScript"')==1
+          assert s.count('id="evidencePhotoStyles"')==1
+          assert 'figure img.zoomable' in s and '.photo img' in s
+          assert "indexedDB.open(DB,1)" in s
+          assert 'Trocar foto' in s and 'Salvar foto' in s and 'Restaurar' in s
+          assert s.count('class="slide-viewport"')==15
+      - name: Publicar
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git diff --cached --quiet || git commit -m "Adiciona troca e salvamento em todas as evidências [fotos-evidencias-ok]"
+          git push
